@@ -1,0 +1,86 @@
+import frida, sys
+import json
+
+def on_message(message, data):#data为附加发送二进制信息
+    print(message)
+    if message['type'] == 'send':
+        payload = message['payload']
+        with open('test','a+') as file:
+            file.write(json.dumps(payload)+'\n')
+    else:
+        print(message)
+
+
+jscode = """
+function gettime(){
+    var d = new Date();
+    return d.getTime();
+}
+function showStacks() {
+    Java.perform(function () {
+        var stack = Java.use("android.util.Log").getStackTraceString(Java.use("java.lang.Exception").$new());
+        //send({"stack":stack});
+    });
+}
+
+function getdic(){
+    var dic = {
+    "android.net.wifi.WifiInfo":["getSSID","getBSSID","getMacAddress","getSubscriberId","getSimSerialNumber","getLine1Number","getCellLocation","getAllCellInfo"],
+    "android.net.wifi.WifiManager":["getScanResults"],
+    "android.telephony.TelephonyManager":["getDeviceId","getImei","getNetworkOperator","getSimCountryIso"],
+    "android.provider.Settings$Secure":["getString"],
+    "android.app.ActivityManager":["getRunningTasks"],
+    "android.app.ApplicationPackageManager":["getInstalledApplications","getInstalledPackages"],
+    "android.hardware.SensorManager":["registerListener"],
+    "android.accounts.AccountManager":["getAccounts","getAccountsByType"],
+    "android.bluetooth.le.BluetoothLeScanner":["startScan"],
+    "android.location.LocationManager":["LocationManager"],
+    "android.media.MediaRecorder":["finalize"]
+    }
+    return dic
+}
+function hookAllOverloads(targetClass, targetMethod) {
+    Java.perform(function () {
+         var targetClassMethod = targetClass + '.' + targetMethod;
+         var hook = Java.use(targetClass);
+         try{
+             var overloadCount = hook[targetMethod].overloads.length;
+         }
+         catch(e){
+             send({"err":targetClass + '.' + targetMethod})
+         }
+         for (var i = 0; i < overloadCount; i++) {
+                hook[targetMethod].overloads[i].implementation = function() {
+                     var retval = this[targetMethod].apply(this, arguments);
+                     var name = targetClass + '.' + targetMethod
+                     var time = gettime();
+                     var stack = Java.use("android.util.Log").getStackTraceString(Java.use("java.lang.Exception").$new());
+                     var res = {"name":name,"time":time,"stack":stack};
+                     send(res);
+                     //var stack = showStacks();
+                     
+                     
+                     //这里可以打印结果和参数
+                     return retval;
+                 }
+              }
+   });
+ }
+var dic = getdic()
+for (var key1 in dic){
+  for (var key2 in dic[key1]){
+      //console.log(key1)
+      //console.log(dic[key1][key2])
+      hookAllOverloads(key1,dic[key1][key2])
+
+      
+  }
+}
+
+"""
+
+process = frida.get_usb_device().attach('包名')
+script = process.create_script(jscode)
+script.on('message', on_message)
+script.load()
+sys.stdin.read()
